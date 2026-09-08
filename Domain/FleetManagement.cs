@@ -81,11 +81,13 @@ public sealed class FleetManagementEngine
         if (state == null) throw new ArgumentNullException(nameof(state));
         var existing = state.Fleet.SingleOrDefault(x => x.AssetId == assetId);
         if (existing != null) return existing;
+        var displayName = string.IsNullOrWhiteSpace(visibleName) ? (definitionId ?? assetId) : visibleName!.Trim();
+        if (displayName.Length > 48) displayName = displayName.Substring(0, 48);
         var created = new FleetAssetState
         {
             AssetId = assetId,
             Kind = FleetVehicleClassifier.Classify(type, definitionId),
-            DisplayName = string.IsNullOrWhiteSpace(visibleName) ? (definitionId ?? assetId) : visibleName!.Trim(),
+            DisplayName = displayName,
             OperationalState = FleetOperationalState.Available
         };
         state.Fleet.Add(created);
