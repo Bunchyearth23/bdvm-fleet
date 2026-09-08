@@ -1,6 +1,6 @@
 # BDVM - Fleet
 
-`BDVM.Fleet` models railway equipment as persistent economic assets. It owns identity, ownership, acquisition, resale, leasing and lifecycle protection for locomotives and wagons.
+`BDVM.Fleet` models railway equipment as persistent economic assets. It owns identity, ownership, acquisition, resale, leasing, lifecycle protection and the versioned classification policy for physical rolling-stock population.
 
 ## Status
 
@@ -29,7 +29,7 @@ Important entry points include `VehicleAcquisitionEngine`, `VehicleResaleEngine`
 
 ## Boundaries
 
-Fleet does not decide market supply or prices, debit wallets directly, spawn game objects on its own or generate freight jobs. `BDVM.Market` supplies catalog and financing decisions, `BDVM.Companies` owns money, and the runtime composition provides Unity adapters.
+Fleet does not decide market supply or prices, debit wallets directly, spawn game objects on its own or generate freight jobs. `WorldPopulationPolicy` classifies purchased, leased, starter, recovery, external traffic, natural, contract-provided, tutorial and unknown sources; runtime adapters enforce those decisions at targeted generator boundaries. `BDVM.Market` supplies catalog and financing decisions, `BDVM.Companies` owns money, and the runtime composition provides Unity adapters.
 
 ## Dependencies and composition
 
