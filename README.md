@@ -35,6 +35,8 @@ Fleet does not decide market supply or prices, debit wallets directly, spawn gam
 
 The declared dependencies are `BDVM.Common` and `BDVM.Companies`. During the current migration, the repository owns `Domain/`, but those files are linked into `BDVM.Full`; the standalone project currently compiles the module marker. This avoids duplicate runtime types until packaging is finalized.
 
+External dependencies: none. Vanilla and Custom Car Loader vehicles are represented through stable identifiers and Unity adapters; Fleet does not link against a Custom Car Loader assembly.
+
 ## Build
 
 Keep the required repositories as siblings under `src/`, then run:
