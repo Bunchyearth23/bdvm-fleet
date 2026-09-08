@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><LangVersion>latest</LangVersion><Nullable>enable</Nullable><AssemblyName>BDVM.Fleet</AssemblyName><RootNamespace>BDVM.Fleet</RootNamespace></PropertyGroup>
+  <ItemGroup><Compile Remove="Domain\**\*.cs" /><ProjectReference Include="..\BDVM.Common\BDVM.Common.csproj" /><ProjectReference Include="..\BDVM.Companies\BDVM.Companies.csproj" /></ItemGroup>
+</Project>
