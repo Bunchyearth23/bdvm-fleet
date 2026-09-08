@@ -86,7 +86,7 @@ public sealed class AcquisitionRecord
 public sealed class VehicleAcquisitionSnapshot
 {
     public const string CurrentSchema = "bdvm.vehicle-acquisition";
-    public const int CurrentVersion = 17;
+    public const int CurrentVersion = 19;
     [DataMember(Name = "schema", Order = 1)] public string Schema { get; set; } = CurrentSchema;
     [DataMember(Name = "schemaVersion", Order = 2)] public int SchemaVersion { get; set; } = CurrentVersion;
     [DataMember(Name = "checkpointId", Order = 3)] public string CheckpointId { get; set; } = "";
@@ -121,6 +121,7 @@ public sealed class VehicleAcquisitionSnapshot
     [DataMember(Name = "assetLifecycle", Order = 32)] public AssetLifecycleState AssetLifecycle { get; set; } = new AssetLifecycleState();
     [DataMember(Name = "financing", Order = 33)] public FinancingStateStore Financing { get; set; } = new FinancingStateStore();
     [DataMember(Name = "triageAssistance", Order = 34)] public TriageAssistanceState TriageAssistance { get; set; } = new TriageAssistanceState();
+    [DataMember(Name = "initialDeliveries", Order = 35)] public List<InitialDeliveryGrant> InitialDeliveries { get; set; } = new List<InitialDeliveryGrant>();
 }
 
 public interface IExistingVehicleOwnershipAdapter
@@ -302,7 +303,7 @@ public static class VehicleAcquisitionPersistence
     public static void Validate(VehicleAcquisitionSnapshot s)
     {
         if (s == null || s.Schema != VehicleAcquisitionSnapshot.CurrentSchema || s.SchemaVersion != VehicleAcquisitionSnapshot.CurrentVersion || string.IsNullOrWhiteSpace(s.CheckpointId) || s.Economy.CheckpointId != s.CheckpointId) throw new InvalidDataException("Unsupported or unscoped acquisition snapshot.");
-        s.Fleet = s.Fleet ?? new List<FleetAssetState>(); s.FleetCommands = s.FleetCommands ?? new List<FleetCommandRecord>(); s.ResaleQuotes = s.ResaleQuotes ?? new List<VehicleResaleQuote>(); s.Resales = s.Resales ?? new List<VehicleResaleRecord>(); s.CompanyLiquidations = s.CompanyLiquidations ?? new List<CompanyLiquidationRecord>(); s.OperatingCosts = s.OperatingCosts ?? new List<OperatingCostRecord>(); s.Market = s.Market ?? new FiniteMarketState(); s.LeaseClock = s.LeaseClock ?? new LeaseClock(); s.Leases = s.Leases ?? new List<LeaseContract>(); s.LeaseActions = s.LeaseActions ?? new List<LeaseActionRecord>(); s.Assignments = s.Assignments ?? new List<MissionAssignment>(); s.AssignmentCommands = s.AssignmentCommands ?? new List<MissionAssignmentCommand>(); s.IndustrialStocks = s.IndustrialStocks ?? new List<IndustrialStock>(); s.IndustrialRecipes = s.IndustrialRecipes ?? new List<IndustrialRecipe>(); s.IndustrialContracts = s.IndustrialContracts ?? new List<IndustrialContract>(); s.IndustrialCommands = s.IndustrialCommands ?? new List<MissionAssignmentCommand>(); s.OutboundLeases = s.OutboundLeases ?? new List<OutboundLeaseContract>(); s.OutboundLeaseActions = s.OutboundLeaseActions ?? new List<OutboundLeaseActionRecord>(); s.PassengerRoutes = s.PassengerRoutes ?? new List<PassengerRouteDemand>(); s.PassengerContracts = s.PassengerContracts ?? new List<PassengerServiceContract>(); s.PassengerCommands = s.PassengerCommands ?? new List<MissionAssignmentCommand>(); s.DynamicEconomy = s.DynamicEconomy ?? new DynamicEconomyState(); s.DedicatedAuthority = s.DedicatedAuthority ?? new DedicatedAuthorityState(); s.AssetLifecycle = s.AssetLifecycle ?? new AssetLifecycleState(); s.Financing = s.Financing ?? new FinancingStateStore(); s.TriageAssistance = s.TriageAssistance ?? new TriageAssistanceState();
+        s.Fleet = s.Fleet ?? new List<FleetAssetState>(); s.FleetCommands = s.FleetCommands ?? new List<FleetCommandRecord>(); s.ResaleQuotes = s.ResaleQuotes ?? new List<VehicleResaleQuote>(); s.Resales = s.Resales ?? new List<VehicleResaleRecord>(); s.CompanyLiquidations = s.CompanyLiquidations ?? new List<CompanyLiquidationRecord>(); s.OperatingCosts = s.OperatingCosts ?? new List<OperatingCostRecord>(); s.Market = s.Market ?? new FiniteMarketState(); s.LeaseClock = s.LeaseClock ?? new LeaseClock(); s.Leases = s.Leases ?? new List<LeaseContract>(); s.LeaseActions = s.LeaseActions ?? new List<LeaseActionRecord>(); s.Assignments = s.Assignments ?? new List<MissionAssignment>(); s.AssignmentCommands = s.AssignmentCommands ?? new List<MissionAssignmentCommand>(); s.IndustrialStocks = s.IndustrialStocks ?? new List<IndustrialStock>(); s.IndustrialRecipes = s.IndustrialRecipes ?? new List<IndustrialRecipe>(); s.IndustrialContracts = s.IndustrialContracts ?? new List<IndustrialContract>(); s.IndustrialCommands = s.IndustrialCommands ?? new List<MissionAssignmentCommand>(); s.OutboundLeases = s.OutboundLeases ?? new List<OutboundLeaseContract>(); s.OutboundLeaseActions = s.OutboundLeaseActions ?? new List<OutboundLeaseActionRecord>(); s.PassengerRoutes = s.PassengerRoutes ?? new List<PassengerRouteDemand>(); s.PassengerContracts = s.PassengerContracts ?? new List<PassengerServiceContract>(); s.PassengerCommands = s.PassengerCommands ?? new List<MissionAssignmentCommand>(); s.DynamicEconomy = s.DynamicEconomy ?? new DynamicEconomyState(); s.DedicatedAuthority = s.DedicatedAuthority ?? new DedicatedAuthorityState(); s.AssetLifecycle = s.AssetLifecycle ?? new AssetLifecycleState(); s.Financing = s.Financing ?? new FinancingStateStore(); s.TriageAssistance = s.TriageAssistance ?? new TriageAssistanceState(); s.InitialDeliveries = s.InitialDeliveries ?? new List<InitialDeliveryGrant>();
         CompanyEconomyPersistence.Validate(s.Economy); var assetValidation = AssetRegistry.Validate(s.Assets); if (!assetValidation.IsValid) throw new InvalidDataException(string.Join("; ", assetValidation.Errors));
         FiniteMarketValidation.Validate(s.Market);
         LeaseValidation.Validate(s);
@@ -315,6 +316,7 @@ public static class VehicleAcquisitionPersistence
         AssetLifecycleValidation.Validate(s.AssetLifecycle, s);
         FinancingValidation.Validate(s.Financing, s);
         TriageAssistanceValidation.Validate(s.TriageAssistance, s);
+        InitialDeliveryValidation.Validate(s);
         if (s.Offers.GroupBy(x => x.OfferId).Any(g => g.Count() != 1) || s.Acquisitions.GroupBy(x => x.CommandId).Any(g => g.Count() != 1) || s.Ownership.GroupBy(x => x.AssetId).Any(g => g.Count() != 1)) throw new InvalidDataException("Duplicate acquisition identity.");
         if (s.Fleet.GroupBy(x => x.AssetId).Any(g => g.Count() != 1) || s.FleetCommands.GroupBy(x => x.CommandId).Any(g => g.Count() != 1) || s.ResaleQuotes.GroupBy(x => x.QuoteId).Any(g => g.Count() != 1) || s.Resales.GroupBy(x => x.CommandId).Any(g => g.Count() != 1) || s.CompanyLiquidations.GroupBy(x => x.CommandId).Any(g => g.Count() != 1) || s.OperatingCosts.GroupBy(x => x.SessionId).Any(g => g.Count() != 1)) throw new InvalidDataException("Duplicate fleet identity.");
         foreach (var o in s.Offers) if (o.Price < 0 || o.ReferenceValue < 0 || o.ObservedCondition < 0m || o.ObservedCondition > 1m || o.AppliedRate < 0m || !s.Assets.Assets.Any(a => a.AssetId == o.AssetId)) throw new InvalidDataException("Invalid vehicle offer.");
@@ -324,13 +326,14 @@ public static class VehicleAcquisitionPersistence
         foreach (var quote in s.ResaleQuotes) if (quote == null || string.IsNullOrWhiteSpace(quote.QuoteId) || string.IsNullOrWhiteSpace(quote.Fingerprint) || quote.AssetIds == null || quote.AssetIds.Count == 0 || quote.AssetIds.Distinct(StringComparer.Ordinal).Count() != quote.AssetIds.Count || quote.AssetIds.Any(id => !s.Assets.Assets.Any(a => a.AssetId == id)) || quote.Proceeds < 0 || quote.ReferenceValue < 0 || quote.FuelValue < 0 || quote.Proceeds > quote.ReferenceValue + quote.FuelValue || quote.TransferFee < 0 || quote.ObservedCondition < 0m || quote.ObservedCondition > 1m) throw new InvalidDataException("Invalid resale quote.");
         foreach (var resale in s.Resales) if (resale == null || string.IsNullOrWhiteSpace(resale.CommandId) || string.IsNullOrWhiteSpace(resale.Fingerprint) || resale.AssetIds == null || resale.AssetIds.Count == 0 || resale.AssetIds.Any(id => !s.Assets.Assets.Any(a => a.AssetId == id))) throw new InvalidDataException("Invalid resale record.");
         foreach (var liquidation in s.CompanyLiquidations) if (liquidation == null || string.IsNullOrWhiteSpace(liquidation.CommandId) || string.IsNullOrWhiteSpace(liquidation.Fingerprint) || string.IsNullOrWhiteSpace(liquidation.CompanyId) || liquidation.Debts < 0 || liquidation.Penalties < 0 || liquidation.AssetIds == null || liquidation.BeneficiaryIds == null || liquidation.AssetIds.Any(id => !s.Assets.Assets.Any(a => a.AssetId == id))) throw new InvalidDataException("Invalid company liquidation record.");
-        foreach (var cost in s.OperatingCosts) if (cost == null || string.IsNullOrWhiteSpace(cost.SessionId) || string.IsNullOrWhiteSpace(cost.Fingerprint) || string.IsNullOrWhiteSpace(cost.AssetId) || cost.Payer == null || cost.MaximumAuthorizedCost < 0 || cost.VanillaBalanceBefore < 0 || cost.VanillaBalanceAfter < 0 || cost.ActualCost < 0 || cost.ConditionBefore < 0m || cost.ConditionBefore > 1m || cost.ConditionAfter < 0m || cost.ConditionAfter > 1m || !s.Assets.Assets.Any(a => a.AssetId == cost.AssetId)) throw new InvalidDataException("Invalid operating cost record.");
+        foreach (var cost in s.OperatingCosts) if (cost == null || string.IsNullOrWhiteSpace(cost.SessionId) || string.IsNullOrWhiteSpace(cost.Fingerprint) || string.IsNullOrWhiteSpace(cost.AssetId) || cost.Payer == null || cost.MaximumAuthorizedCost < 0 || cost.ReservedAmount < 0 || cost.ReservedAmount > cost.MaximumAuthorizedCost || cost.VanillaBalanceBefore < 0 || cost.VanillaBalanceAfter < 0 || cost.ActualCost < 0 || cost.ConditionBefore < 0m || cost.ConditionBefore > 1m || cost.ConditionAfter < 0m || cost.ConditionAfter > 1m || !s.Assets.Assets.Any(a => a.AssetId == cost.AssetId) || (cost.Payer.Kind == AccountKind.Player && cost.ReservedAmount != 0) || (cost.State == OperatingCostState.Open && cost.Payer.Kind == AccountKind.Company && cost.MaximumAuthorizedCost > 0 && (cost.ReservedAmount != cost.MaximumAuthorizedCost || cost.ReservationReleased)) || (cost.State != OperatingCostState.Open && cost.ReservedAmount > 0 && !cost.ReservationReleased)) throw new InvalidDataException("Invalid operating cost record.");
     }
 
     private static void Migrate(VehicleAcquisitionSnapshot snapshot)
     {
         if (snapshot.Schema == VehicleAcquisitionSnapshot.CurrentSchema && snapshot.SchemaVersion >= 1 && snapshot.SchemaVersion < VehicleAcquisitionSnapshot.CurrentVersion)
         {
+            var sourceVersion = snapshot.SchemaVersion;
             snapshot.Fleet = snapshot.Fleet ?? new List<FleetAssetState>();
             snapshot.FleetCommands = snapshot.FleetCommands ?? new List<FleetCommandRecord>();
             snapshot.ResaleQuotes = snapshot.ResaleQuotes ?? new List<VehicleResaleQuote>();
@@ -357,6 +360,20 @@ public static class VehicleAcquisitionPersistence
             snapshot.AssetLifecycle = snapshot.AssetLifecycle ?? new AssetLifecycleState();
             snapshot.Financing = snapshot.Financing ?? new FinancingStateStore();
             snapshot.TriageAssistance = snapshot.TriageAssistance ?? new TriageAssistanceState();
+            snapshot.InitialDeliveries = snapshot.InitialDeliveries ?? new List<InitialDeliveryGrant>();
+            if (sourceVersion < 18)
+            {
+                foreach (var cost in snapshot.OperatingCosts)
+                {
+                    cost.ReservedAmount = 0;
+                    cost.ReservationReleased = true;
+                    if (cost.State == OperatingCostState.Open && cost.Payer?.Kind == AccountKind.Company)
+                    {
+                        cost.State = OperatingCostState.Rejected;
+                        cost.ResultCode = "legacy-session-reservation-missing";
+                    }
+                }
+            }
             foreach (var quote in snapshot.ResaleQuotes)
             {
                 quote.AssetIds = quote.AssetIds == null || quote.AssetIds.Count == 0 ? new List<string> { quote.AssetId } : quote.AssetIds;

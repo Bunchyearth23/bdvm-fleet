@@ -259,7 +259,7 @@ public sealed class VehicleResaleEngine
             var fleet = state.Fleet.SingleOrDefault(x => x.AssetId == id);
             var ownership = state.Ownership.SingleOrDefault(x => x.AssetId == id);
             if (fleet == null || ownership == null || ownership.Owner.Key != quote.Seller.Key) return "ownership-mismatch";
-            if (state.OperatingCosts.Any(x => x.AssetId == id && (x.State == OperatingCostState.Open || x.ExternalSettlement == ExternalSettlementState.Pending))) return "operating-cost-session-active";
+            if (state.OperatingCosts.Any(x => x.AssetId == id && (x.State == OperatingCostState.Open || x.ExternalSettlement == ExternalSettlementState.Pending || x.ExternalSettlement == ExternalSettlementState.Conflict))) return "operating-cost-session-active";
             if (fleet.OperationalState != FleetOperationalState.Available && fleet.OperationalState != FleetOperationalState.Stored) return "asset-not-transferable";
             if (fleet.Operator != null) return "operator-assignment-active";
             if (fleet.Version != Expected(command.ExpectedFleetVersions, id, command.ExpectedFleetVersion) || ownership.Version != Expected(command.ExpectedOwnershipVersions, id, command.ExpectedOwnershipVersion)) return "version-mismatch";
