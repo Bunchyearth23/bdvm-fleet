@@ -71,7 +71,9 @@ public static class AssetLifecycleProtectionPolicy
     private static bool HasActiveContract(VehicleAcquisitionSnapshot state, string assetId) =>
         state.Leases.Any(x => x.AssetIds.Contains(assetId) && x.State != LeaseState.Returned && x.State != LeaseState.Purchased && x.State != LeaseState.Cancelled) ||
         state.OutboundLeases.Any(x => x.AssetIds.Contains(assetId) && x.State != OutboundLeaseState.Returned && x.State != OutboundLeaseState.Cancelled) ||
-        state.Assignments.Any(x => x.AssetIds.Contains(assetId) && x.State != MissionAssignmentState.Completed && x.State != MissionAssignmentState.Cancelled);
+        state.Assignments.Any(x => x.AssetIds.Contains(assetId) && x.State != MissionAssignmentState.Completed && x.State != MissionAssignmentState.Cancelled) ||
+        state.IndustrialContracts.Any(x => x.AssignedWagons.Any(w => w.AssetId == assetId) && x.State != IndustrialContractState.Completed && x.State != IndustrialContractState.Cancelled && x.State != IndustrialContractState.Expired) ||
+        state.PassengerContracts.Any(x => x.AssetIds.Contains(assetId) && x.State != PassengerContractState.Completed && x.State != PassengerContractState.Cancelled);
 }
 
 public sealed class AssetLifecycleEngine
@@ -127,7 +129,12 @@ public sealed class AssetLifecycleEngine
         if (fleet != null && fleet.OperationalState != FleetOperationalState.ReconcileRequired) { fleet.OperationalState = FleetOperationalState.ReconcileRequired; fleet.Version++; }
     }
 
-    private bool HasActiveContract(string assetId) => state.Leases.Any(x => x.AssetIds.Contains(assetId) && x.State != LeaseState.Returned && x.State != LeaseState.Purchased && x.State != LeaseState.Cancelled) || state.OutboundLeases.Any(x => x.AssetIds.Contains(assetId) && x.State != OutboundLeaseState.Returned && x.State != OutboundLeaseState.Cancelled) || state.Assignments.Any(x => x.AssetIds.Contains(assetId) && x.State != MissionAssignmentState.Completed && x.State != MissionAssignmentState.Cancelled);
+    private bool HasActiveContract(string assetId) =>
+        state.Leases.Any(x => x.AssetIds.Contains(assetId) && x.State != LeaseState.Returned && x.State != LeaseState.Purchased && x.State != LeaseState.Cancelled) ||
+        state.OutboundLeases.Any(x => x.AssetIds.Contains(assetId) && x.State != OutboundLeaseState.Returned && x.State != OutboundLeaseState.Cancelled) ||
+        state.Assignments.Any(x => x.AssetIds.Contains(assetId) && x.State != MissionAssignmentState.Completed && x.State != MissionAssignmentState.Cancelled) ||
+        state.IndustrialContracts.Any(x => x.AssignedWagons.Any(w => w.AssetId == assetId) && x.State != IndustrialContractState.Completed && x.State != IndustrialContractState.Cancelled && x.State != IndustrialContractState.Expired) ||
+        state.PassengerContracts.Any(x => x.AssetIds.Contains(assetId) && x.State != PassengerContractState.Completed && x.State != PassengerContractState.Cancelled);
     private static bool GuidEquals(string left, string? right) => Guid.TryParse(left, out var a) && Guid.TryParse(right, out var b) && a == b;
     private void RequireHost() { if (!NetworkAuthorityPolicy.CanExecuteEconomy(authority.Detect(), out var reason)) throw new InvalidOperationException(reason); }
 }

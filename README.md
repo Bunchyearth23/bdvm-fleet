@@ -29,6 +29,8 @@ Important entry points include `VehicleAcquisitionEngine`, `VehicleResaleEngine`
 
 ## Boundaries
 
+Cleanup protection covers exact persistent `CarGUID` links for owned assets and active inbound lease, outbound lease, mission, industrial or passenger contracts. Merchant and AI traffic remains outside this protection, and terminal contracts release it.
+
 Fleet does not decide market supply or prices, debit wallets directly, spawn game objects on its own or generate freight jobs. `WorldPopulationPolicy` classifies purchased, leased, starter, recovery, external traffic, natural, contract-provided, tutorial and unknown sources; runtime adapters enforce those decisions at targeted generator boundaries. `BDVM.Market` supplies catalog and financing decisions, `BDVM.Companies` owns money, and the runtime composition provides Unity adapters.
 
 ## Dependencies and composition
