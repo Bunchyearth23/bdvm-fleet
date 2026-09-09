@@ -20,6 +20,36 @@ public enum WorldPopulationSource
 
 public enum WorldPopulationDecisionKind { Allow, Deny }
 
+public enum WorldPopulationCareerKind { NewCareer, ExistingSave }
+
+public sealed class WorldPopulationCareerRequest
+{
+    public WorldPopulationCareerKind Kind { get; set; }
+    public bool TutorialEnabled { get; set; }
+    public bool HasBdvmCheckpoint { get; set; }
+}
+
+public sealed class WorldPopulationCareerDecision
+{
+    public bool AllowActivation { get; set; }
+    public string ResultCode { get; set; } = "";
+}
+
+public static class WorldPopulationCareerPolicy
+{
+    public static WorldPopulationCareerDecision Evaluate(WorldPopulationCareerRequest request)
+    {
+        if (request == null) throw new ArgumentNullException(nameof(request));
+        if (!Enum.IsDefined(typeof(WorldPopulationCareerKind), request.Kind)) throw new ArgumentException("A known career kind is required.", nameof(request));
+        if (request.Kind == WorldPopulationCareerKind.NewCareer)
+            return Decision(!request.TutorialEnabled, request.TutorialEnabled ? "strict-population-tutorial-refused" : "strict-population-new-career-allowed");
+        return Decision(request.HasBdvmCheckpoint, request.HasBdvmCheckpoint ? "strict-population-existing-bdvm-career-allowed" : "strict-population-existing-save-without-bdvm-checkpoint");
+    }
+
+    private static WorldPopulationCareerDecision Decision(bool allow, string code) =>
+        new WorldPopulationCareerDecision { AllowActivation = allow, ResultCode = code };
+}
+
 [DataContract]
 public sealed class WorldPopulationRule
 {
