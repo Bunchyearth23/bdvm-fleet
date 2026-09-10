@@ -5,7 +5,7 @@ using System.Runtime.Serialization;
 
 namespace BDVM.Domain;
 
-public enum LeaseState { Offered, Active, Delinquent, ReturnPending, Returned, PurchasePending, Purchased, Cancelled }
+public enum LeaseState { Offered, Active, Delinquent, ReturnDue, ReturnPending, Returned, PurchasePending, Purchased, Cancelled }
 public enum LeaseActionState { Succeeded, Rejected, ReconcileRequired }
 
 [DataContract]
@@ -94,11 +94,12 @@ public sealed class LeaseEngine
             var known = state.Leases.SingleOrDefault(x => x.LeaseId == leaseId); if (known != null) return known;
             var ids = assetIds.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
             if (string.IsNullOrWhiteSpace(leaseId) || ids.Count == 0 || deposit < 0 || initialFee < 0 || rent < 0 || interval <= 0 || duration <= 0 || purchaseOption < 0 || condition < 0m || condition > 1m || maximumDamageCharge < 0) throw new ArgumentException("Invalid lease terms.");
+            EnsureCompleteBundles(ids);
             foreach (var id in ids)
             {
                 var owner = state.Ownership.Single(x => x.AssetId == id).Owner;
                 if (owner.Kind != AssetOwnerKind.Merchant) throw new InvalidOperationException("Inbound lease offers require merchant-owned assets.");
-                if (state.Leases.Any(x => x.AssetIds.Contains(id) && (x.State == LeaseState.Offered || x.State == LeaseState.Active || x.State == LeaseState.Delinquent || x.State == LeaseState.ReturnPending || x.State == LeaseState.PurchasePending))) throw new InvalidOperationException("Asset already belongs to an active lease workflow.");
+                if (state.Leases.Any(x => x.AssetIds.Contains(id) && (x.State == LeaseState.Offered || x.State == LeaseState.Active || x.State == LeaseState.Delinquent || x.State == LeaseState.ReturnDue || x.State == LeaseState.ReturnPending || x.State == LeaseState.PurchasePending))) throw new InvalidOperationException("Asset already belongs to an active lease workflow.");
                 if (!state.Fleet.Any(x => x.AssetId == id)) throw new InvalidOperationException("Every leased asset must be in the fleet registry.");
             }
             var lease = new LeaseContract { LeaseId = leaseId, AssetIds = ids, Deposit = deposit, InitialFee = initialFee, RentAmount = rent,
@@ -108,11 +109,117 @@ public sealed class LeaseEngine
         }
     }
 
+    private void EnsureCompleteBundles(IReadOnlyCollection<string> ids)
+    {
+        foreach (var bundle in state.Assets.Bundles.Where(value => value.ComponentAssetIds.Any(ids.Contains)))
+            if (bundle.ComponentAssetIds.Any(componentId => !ids.Contains(componentId)))
+                throw new InvalidOperationException("A multi-component rolling-stock bundle must be leased as one complete unit.");
+    }
+
+    public LeaseContract CreateCatalogOffer(string leaseId, IReadOnlyList<string> definitionIds, long deposit, long initialFee, long rent, long interval,
+        long duration, long? purchaseOption, decimal condition, long maximumDamageCharge)
+    {
+        lock (gate)
+        {
+            RequireHost();
+            var definitions = (definitionIds ?? Array.Empty<string>()).Select(value => value?.Trim() ?? "").Where(value => value.Length > 0).ToArray();
+            if (definitions.Length == 0) throw new ArgumentException("A catalog lease requires at least one rolling-stock definition.");
+            var known = state.Leases.SingleOrDefault(value => value.LeaseId == leaseId);
+            if (known != null)
+            {
+                var knownDefinitions = known.AssetIds.Select(assetId => state.Assets.Assets.Single(asset => asset.AssetId == assetId).DefinitionId).ToArray();
+                if (!knownDefinitions.SequenceEqual(definitions, StringComparer.Ordinal)) throw new InvalidOperationException("Catalog lease ID payload conflict.");
+                return known;
+            }
+            var created = new List<FleetAsset>();
+            var consumedStock = new List<MarketStockEntry>();
+            try
+            {
+                foreach (var definitionId in definitions)
+                {
+                    var catalog = state.Market.Catalog.SingleOrDefault(value => value.DefinitionId == definitionId) ?? throw new InvalidOperationException("Unknown catalog definition: " + definitionId);
+                    var stock = state.Market.Stock.Where(value => value.DefinitionId == definitionId && value.Available > 0).OrderBy(value => value.LocationId, StringComparer.Ordinal).FirstOrDefault()
+                        ?? throw new InvalidOperationException("Finite market stock is exhausted for catalog definition: " + definitionId);
+                    stock.Available--; stock.Version++; consumedStock.Add(stock);
+                    if (!state.Assets.Definitions.Any(value => value.DefinitionId == definitionId)) state.Assets.Definitions.Add(new AssetDefinition { DefinitionId = definitionId, Origin = "inbound-lease-catalog" });
+                    var asset = FleetAsset.Create(definitionId, Guid.NewGuid().ToString("D"));
+                    asset.GameLink.State = PersistentLinkState.TemporarilyAbsent;
+                    asset.GameLink.Detail = "Merchant virtual stock awaiting accepted-lease delivery.";
+                    state.Assets.Assets.Add(asset);
+                    state.Ownership.Add(new AssetOwnership { AssetId = asset.AssetId, Owner = AssetOwnerRef.Merchant("market"), Version = 1 });
+                    FleetManagementEngine.EnsureAsset(state, asset.AssetId, catalog.CategoryId, definitionId, definitionId);
+                    created.Add(asset);
+                }
+                if (created.Count > 1) state.Assets.Bundles.Add(new AssetBundle { BundleId = Guid.NewGuid().ToString("N"), ComponentAssetIds = created.Select(value => value.AssetId).ToList() });
+                return CreateOffer(leaseId, created.Select(value => value.AssetId).ToArray(), deposit, initialFee, rent, interval, duration, purchaseOption, condition, maximumDamageCharge);
+            }
+            catch
+            {
+                var ids = created.Select(value => value.AssetId).ToHashSet(StringComparer.Ordinal);
+                state.Assets.Bundles.RemoveAll(value => value.ComponentAssetIds.Any(ids.Contains));
+                state.Fleet.RemoveAll(value => ids.Contains(value.AssetId));
+                state.Ownership.RemoveAll(value => ids.Contains(value.AssetId));
+                state.Assets.Assets.RemoveAll(value => ids.Contains(value.AssetId));
+                foreach (var stock in consumedStock) { stock.Available++; stock.Version++; }
+                throw;
+            }
+        }
+    }
+
+    public LeaseContract CreateCatalogListingOffer(string leaseId, IReadOnlyList<string> listingIds, long deposit, long initialFee, long rent, long interval,
+        long duration, long? purchaseOption, decimal condition, long maximumDamageCharge)
+    {
+        lock (gate)
+        {
+            RequireHost();
+            var ids = (listingIds ?? Array.Empty<string>()).Select(value => value?.Trim() ?? "").Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+            if (ids.Length == 0) throw new ArgumentException("A catalog lease requires at least one finite listing.");
+            var known = state.Leases.SingleOrDefault(value => value.LeaseId == leaseId);
+            if (known != null)
+            {
+                var knownListings = state.Market.Listings.Where(value => value.ReservedBy == "lease:" + leaseId).Select(value => value.ListingId).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+                if (!knownListings.SequenceEqual(ids.OrderBy(value => value, StringComparer.Ordinal), StringComparer.Ordinal)) throw new InvalidOperationException("Catalog lease ID payload conflict.");
+                return known;
+            }
+            var listings = ids.Select(id => state.Market.Listings.SingleOrDefault(value => value.ListingId == id) ?? throw new InvalidOperationException("Unknown finite listing: " + id)).ToArray();
+            if (listings.Any(value => value.Kind != MarketListingKind.NewOrder || value.State != MarketListingState.Available || value.ExpiresTick <= state.Market.ClockTick))
+                throw new InvalidOperationException("Only available, unexpired catalog listings can be leased.");
+            var created = new List<FleetAsset>();
+            try
+            {
+                foreach (var listing in listings)
+                {
+                    if (!state.Assets.Definitions.Any(value => value.DefinitionId == listing.DefinitionId)) state.Assets.Definitions.Add(new AssetDefinition { DefinitionId = listing.DefinitionId, Origin = "inbound-lease-listing" });
+                    var asset = FleetAsset.Create(listing.DefinitionId, Guid.NewGuid().ToString("D"));
+                    asset.GameLink.State = PersistentLinkState.TemporarilyAbsent;
+                    asset.GameLink.Detail = "Merchant virtual stock awaiting accepted-lease delivery.";
+                    state.Assets.Assets.Add(asset);
+                    state.Ownership.Add(new AssetOwnership { AssetId = asset.AssetId, Owner = AssetOwnerRef.Merchant("market"), Version = 1 });
+                    FleetManagementEngine.EnsureAsset(state, asset.AssetId, listing.CategoryId, listing.DefinitionId, listing.DefinitionId);
+                    listing.AssetId = asset.AssetId; listing.State = MarketListingState.Sold; listing.ReservedBy = "lease:" + leaseId; listing.Version++;
+                    created.Add(asset);
+                }
+                if (created.Count > 1) state.Assets.Bundles.Add(new AssetBundle { BundleId = Guid.NewGuid().ToString("N"), ComponentAssetIds = created.Select(value => value.AssetId).ToList() });
+                return CreateOffer(leaseId, created.Select(value => value.AssetId).ToArray(), deposit, initialFee, rent, interval, duration, purchaseOption, condition, maximumDamageCharge);
+            }
+            catch
+            {
+                var createdIds = created.Select(value => value.AssetId).ToHashSet(StringComparer.Ordinal);
+                foreach (var listing in listings.Where(value => value.ReservedBy == "lease:" + leaseId)) { listing.AssetId = null; listing.State = MarketListingState.Available; listing.ReservedBy = null; listing.Version++; }
+                state.Assets.Bundles.RemoveAll(value => value.ComponentAssetIds.Any(createdIds.Contains));
+                state.Fleet.RemoveAll(value => createdIds.Contains(value.AssetId));
+                state.Ownership.RemoveAll(value => createdIds.Contains(value.AssetId));
+                state.Assets.Assets.RemoveAll(value => createdIds.Contains(value.AssetId));
+                throw;
+            }
+        }
+    }
+
     public LeaseActionRecord Accept(string commandId, string requesterId, string leaseId, AssetOwnerRef lessee, AccountRef payer, long expectedLeaseVersion, long expectedWalletVersion)
     {
         lock (gate)
         {
-            RequireHost(); var fingerprint = string.Join("|", requesterId, leaseId, lessee.Key, payer.Key, expectedLeaseVersion, expectedWalletVersion);
+            RequireHost(); var fingerprint = string.Join("|", requesterId, leaseId, lessee.Key, payer.Key);
             var known = Known(commandId, fingerprint); if (known != null) return known;
             var lease = state.Leases.Single(x => x.LeaseId == leaseId); var record = New(commandId, fingerprint, leaseId); state.LeaseActions.Add(record);
             var player = state.Economy.Players.SingleOrDefault(x => x.PlayerId == requesterId); var wallet = state.Economy.Wallets.SingleOrDefault(x => x.Account.Key == payer.Key);
@@ -139,7 +246,15 @@ public sealed class LeaseEngine
             var delta = !advance.SessionOpen || advance.Paused ? 0 : checked(advance.ActiveGameplayTicks + advance.SleepTicks + advance.FastTravelTicks);
             state.LeaseClock.ActiveTick = checked(state.LeaseClock.ActiveTick + delta); state.LeaseClock.Version++;
             state.LeaseActions.Add(new LeaseActionRecord { CommandId = advance.CommandId, Fingerprint = fingerprint, LeaseId = "clock", State = LeaseActionState.Succeeded, ResultCode = "lease-clock-advanced", Amount = delta });
-            foreach (var lease in state.Leases.Where(x => x.State == LeaseState.Active || x.State == LeaseState.Delinquent).ToArray()) ChargeDue(lease);
+            foreach (var lease in state.Leases.Where(x => x.State == LeaseState.Active || x.State == LeaseState.Delinquent).ToArray())
+            {
+                ChargeDue(lease);
+                if (state.LeaseClock.ActiveTick >= lease.EndTick && (lease.State == LeaseState.Active || lease.State == LeaseState.Delinquent))
+                {
+                    lease.State = LeaseState.ReturnDue;
+                    lease.Version++;
+                }
+            }
             return state.LeaseClock.ActiveTick;
         }
     }
@@ -148,9 +263,9 @@ public sealed class LeaseEngine
     {
         lock (gate)
         {
-            RequireHost(); var fingerprint = requesterId + "|" + leaseId + "|" + conditionAtReturn; var known = Known(commandId, fingerprint); if (known != null) return known;
+            RequireHost(); var fingerprint = requesterId + "|" + leaseId + "|return"; var known = Known(commandId, fingerprint); if (known != null) return known;
             var lease = state.Leases.Single(x => x.LeaseId == leaseId); var record = New(commandId, fingerprint, leaseId); state.LeaseActions.Add(record);
-            if ((lease.State != LeaseState.Active && lease.State != LeaseState.Delinquent) || conditionAtReturn < 0m || conditionAtReturn > 1m || lease.Lessee == null || lease.Payer == null) return Reject(record, "lease-not-returnable");
+            if ((lease.State != LeaseState.Active && lease.State != LeaseState.Delinquent && lease.State != LeaseState.ReturnDue) || conditionAtReturn < 0m || conditionAtReturn > 1m || lease.Lessee == null || lease.Payer == null) return Reject(record, "lease-not-returnable");
             if (!RequesterControls(requesterId, lease.Lessee, false)) return Reject(record, "lessee-control-required");
             foreach (var id in lease.AssetIds) { var asset = state.Assets.Assets.Single(x => x.AssetId == id); var inspection = releaseGuard.Inspect(asset.GameLink.Value!); if (inspection.Status != AssetReleaseStatus.Releasable) return Reject(record, "asset-not-returnable:" + inspection.Status); }
             var damage = checked(decimal.ToInt64(decimal.Floor(Math.Max(0m, lease.ConditionAtStart - conditionAtReturn) * lease.MaximumDamageCharge)));
@@ -168,7 +283,7 @@ public sealed class LeaseEngine
         {
             RequireHost(); var fingerprint = requesterId + "|" + leaseId + "|purchase"; var known = Known(commandId, fingerprint); if (known != null) return known;
             var lease = state.Leases.Single(x => x.LeaseId == leaseId); var record = New(commandId, fingerprint, leaseId); state.LeaseActions.Add(record);
-            if ((lease.State != LeaseState.Active && lease.State != LeaseState.Delinquent) || lease.PurchaseOptionPrice == null || lease.Lessee == null || lease.Payer == null) return Reject(record, "purchase-option-unavailable");
+            if ((lease.State != LeaseState.Active && lease.State != LeaseState.Delinquent && lease.State != LeaseState.ReturnDue) || lease.PurchaseOptionPrice == null || lease.Lessee == null || lease.Payer == null) return Reject(record, "purchase-option-unavailable");
             if (!RequesterControls(requesterId, lease.Lessee, true)) return Reject(record, "lessee-control-required");
             var total = checked(lease.PurchaseOptionPrice.Value + lease.OutstandingDebt); var depositApplied = Math.Min(lease.HeldDeposit, total); var debit = total - depositApplied;
             var wallet = state.Economy.Wallets.Single(x => x.Account.Key == lease.Payer.Key); if (wallet.Balance < debit) return Reject(record, "insufficient-funds");

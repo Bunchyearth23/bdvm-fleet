@@ -197,7 +197,7 @@ public sealed class FleetManagementEngine
     }
 
     private bool CanOperateLease(string assetId, PlayerEconomicState player) => state.Leases.Any(x => x.AssetIds.Contains(assetId) &&
-        (x.State == LeaseState.Active || x.State == LeaseState.Delinquent) && x.Lessee != null &&
+        (x.State == LeaseState.Active || x.State == LeaseState.Delinquent || x.State == LeaseState.ReturnDue) && x.Lessee != null &&
         ((x.Lessee.Kind == AssetOwnerKind.Player && x.Lessee.OwnerId == player.PlayerId) ||
          (x.Lessee.Kind == AssetOwnerKind.Company && x.Lessee.OwnerId == player.CompanyId)));
 

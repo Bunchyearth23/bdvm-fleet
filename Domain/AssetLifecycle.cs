@@ -19,6 +19,25 @@ public sealed class AssetLifecycleObservation
     [DataMember(Name = "liveryId", Order = 6)] public string? LiveryId { get; set; }
 }
 
+public static class FleetLocationProjection
+{
+    public static IReadOnlyDictionary<string, string> Resolve(VehicleAcquisitionSnapshot snapshot, IReadOnlyList<AssetLifecycleObservation>? observations)
+    {
+        if (snapshot == null) throw new ArgumentNullException(nameof(snapshot));
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        var visible = observations ?? Array.Empty<AssetLifecycleObservation>();
+        foreach (var fleet in snapshot.Fleet ?? new List<FleetAssetState>())
+        {
+            var asset = snapshot.Assets?.Assets?.SingleOrDefault(value => value.AssetId == fleet.AssetId);
+            if (asset?.GameLink == null || !Guid.TryParse(asset.GameLink.Value, out var expectedGuid) || expectedGuid == Guid.Empty) continue;
+            var matches = visible.Where(value => value != null && Guid.TryParse(value.PersistentCarGuid, out var observedGuid) && observedGuid == expectedGuid).ToArray();
+            if (matches.Length != 1 || !string.Equals(matches[0].DefinitionId, asset.DefinitionId, StringComparison.Ordinal) || string.IsNullOrWhiteSpace(matches[0].TrackId)) continue;
+            result[fleet.AssetId] = matches[0].TrackId!.Trim();
+        }
+        return result;
+    }
+}
+
 [DataContract]
 public sealed class AssetLifecycleRecord
 {
