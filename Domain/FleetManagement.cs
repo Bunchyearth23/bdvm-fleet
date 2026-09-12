@@ -7,7 +7,7 @@ namespace BDVM.Domain;
 
 public enum FleetVehicleKind { Unknown, Locomotive, FreightWagon, PassengerCar }
 public enum FleetOperationalState { Available, Reserved, InService, Maintenance, Stored, ReconcileRequired }
-public enum FleetCommandAction { Rename, SetOperationalState, AssignOperator, TransferOwnership, ClearOperator }
+public enum FleetCommandAction { Rename, SetOperationalState, AssignOperator, TransferOwnership, ClearOperator, ConfirmPhysicalRemoval }
 public enum FleetCommandOutcome { Succeeded, Rejected }
 
 [DataContract]
@@ -58,7 +58,7 @@ public static class FleetVehicleClassifier
         var value = ((type ?? "") + " " + (definitionId ?? "")).ToLowerInvariant();
         if (value.Contains("passenger") || value.Contains("coach")) return FleetVehicleKind.PassengerCar;
         if (value.Contains("loco") || value.Contains("shunter") || value.Contains("steam") || value.Contains("diesel")) return FleetVehicleKind.Locomotive;
-        if (!string.IsNullOrWhiteSpace(type) || value.Contains("wagon") || value.Contains("car") || value.Contains("tender") || value.Contains("caboose")) return FleetVehicleKind.FreightWagon;
+        if (!string.IsNullOrWhiteSpace(type) || value.Contains("wagon") || value.Contains("car") || value.Contains("tender") || value.Contains("caboose") || value.Contains("flatbed") || value.Contains("gondola") || value.Contains("hopper") || value.Contains("tanker")) return FleetVehicleKind.FreightWagon;
         return FleetVehicleKind.Unknown;
     }
 }
@@ -80,7 +80,12 @@ public sealed class FleetManagementEngine
     {
         if (state == null) throw new ArgumentNullException(nameof(state));
         var existing = state.Fleet.SingleOrDefault(x => x.AssetId == assetId);
-        if (existing != null) return existing;
+        if (existing != null)
+        {
+            var kind = FleetVehicleClassifier.Classify(type, definitionId);
+            if (existing.Kind == FleetVehicleKind.Unknown && kind != FleetVehicleKind.Unknown) { existing.Kind = kind; existing.Version++; }
+            return existing;
+        }
         var displayName = string.IsNullOrWhiteSpace(visibleName) ? (definitionId ?? assetId) : visibleName!.Trim();
         if (displayName.Length > 48) displayName = displayName.Substring(0, 48);
         var created = new FleetAssetState
@@ -141,6 +146,28 @@ public sealed class FleetManagementEngine
             record.ResultCode = "applied";
             record.FleetVersionAfter = fleet.Version;
             record.Detail = "owner=" + ownership!.Owner.Key + ";operator=" + (fleet.Operator?.Key ?? "none") + ";state=" + fleet.OperationalState;
+            state.FleetCommands.Add(record);
+            return record;
+        }
+    }
+
+    public FleetCommandRecord ConfirmPhysicalRemoval(string commandId, string persistentCarGuid, string source)
+    {
+        lock (gate)
+        {
+            if (!NetworkAuthorityPolicy.CanExecuteEconomy(authority.Detect(), out var reason)) throw new InvalidOperationException(reason);
+            if (string.IsNullOrWhiteSpace(commandId) || !Guid.TryParse(persistentCarGuid, out var expected) || expected == Guid.Empty)
+                throw new ArgumentException("A permanent physical-removal identity is required.");
+            var asset = state.Assets.Assets.SingleOrDefault(value => Guid.TryParse(value.GameLink?.Value, out var actual) && actual == expected);
+            if (asset == null) throw new InvalidOperationException("Physical removal does not match a managed asset.");
+            var fingerprint = persistentCarGuid.ToLowerInvariant() + "|" + (source ?? "");
+            var known = state.FleetCommands.SingleOrDefault(value => value.CommandId == commandId);
+            if (known != null) { if (known.Fingerprint != fingerprint) throw new InvalidOperationException("A fleet command ID cannot be reused with another payload."); return known; }
+            var fleet = state.Fleet.SingleOrDefault(value => value.AssetId == asset.AssetId);
+            var version = fleet?.Version ?? -1;
+            var record = new FleetCommandRecord { CommandId = commandId, Fingerprint = fingerprint, RequesterId = "host", AssetId = asset.AssetId, Action = FleetCommandAction.ConfirmPhysicalRemoval, Outcome = FleetCommandOutcome.Succeeded, ResultCode = fleet == null ? "already-removed" : "physical-removal-confirmed", FleetVersionBefore = version, FleetVersionAfter = version < 0 ? -1 : version + 1, Detail = "source=" + (source ?? "unknown") + ";carGuid=" + persistentCarGuid };
+            if (fleet != null) state.Fleet.Remove(fleet);
+            state.AssetLifecycle.Records.RemoveAll(value => value.AssetId == asset.AssetId);
             state.FleetCommands.Add(record);
             return record;
         }
