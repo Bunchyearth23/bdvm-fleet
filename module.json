@@ -1,1 +1,1 @@
-{"id":"BDVM.Fleet","version":"1.3.0","kind":"feature","dependencies":["BDVM.Common","BDVM.Companies"]}
+{"id":"BDVM.Fleet","displayName":"BDVM - Fleet","version":"1.3.0","kind":"feature","dependencies":["BDVM.Common","BDVM.Companies"]}
