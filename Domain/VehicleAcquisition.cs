@@ -300,8 +300,12 @@ public sealed class VehicleAcquisitionEngine
 
 public static class VehicleAcquisitionPersistence
 {
-    private static readonly DataContractJsonSerializer Serializer = new DataContractJsonSerializer(typeof(VehicleAcquisitionSnapshot));
+    [ThreadStatic] private static DataContractJsonSerializer? threadSerializer;
+    private static DataContractJsonSerializer Serializer => threadSerializer ??= new DataContractJsonSerializer(typeof(VehicleAcquisitionSnapshot));
     public static string Serialize(VehicleAcquisitionSnapshot snapshot) { Validate(snapshot); using (var s = new MemoryStream()) { Serializer.WriteObject(s, snapshot); return Encoding.UTF8.GetString(s.ToArray()); } }
+    // The caller must have validated the immutable worker snapshot already.  This
+    // keeps the commit path from running the full graph validation twice.
+    public static string SerializePrepared(VehicleAcquisitionSnapshot snapshot) { if (snapshot == null) throw new ArgumentNullException(nameof(snapshot)); using (var s = new MemoryStream()) { Serializer.WriteObject(s, snapshot); return Encoding.UTF8.GetString(s.ToArray()); } }
     public static VehicleAcquisitionSnapshot Deserialize(string json, string checkpointId) { using (var s = new MemoryStream(Encoding.UTF8.GetBytes(json ?? ""))) { var v = Serializer.ReadObject(s) as VehicleAcquisitionSnapshot ?? throw new InvalidDataException("Missing acquisition snapshot."); CompanyEconomyPersistence.Migrate(v.Economy); Migrate(v); Validate(v); if (v.CheckpointId != checkpointId) throw new InvalidDataException("Checkpoint mismatch; cross-save acquisition state is forbidden."); return v; } }
     public static void Validate(VehicleAcquisitionSnapshot s)
     {
